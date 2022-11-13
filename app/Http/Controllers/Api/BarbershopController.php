@@ -4,96 +4,101 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Barbershop;
+use App\Models\ImageProduct;
 use App\Models\Location;
 use App\Models\Product;
 use App\Models\Schedule;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Validator;
 
 class BarbershopController extends Controller
 {
-  public function __construct()
-  {
-      $this->middleware('auth:sanctum');
-  }
 
   public function getMyBarbershop()
   {
-    $user = auth('api')->user();
-    if(!$user || !$user->isBarber())
-    abort(401);
-    if($user->barbershop){
-
-        $response = $user->barbershop->getData();
-        $products = $user->barbershop->products;
-        foreach($products as $product){
-          $product['images'] = $product->images;
-        }
-        $response['products'] = $products;
-        $response['schedules'] = $user->barbershop->getSchedules();
-
-        return response()->json($response,200);
-    }else{
-
-      return response()->json('',200);
-    }
+	try {
+		$user = auth()->user();
+		if($user->barbershop){
+			$response = $user->barbershop->getData();
+			$products = $user->barbershop->products;
+			foreach($products as $product){
+				$product['images'] = $product->images;
+			}
+			$response['products'] = $products;
+			$response['schedules'] = $user->barbershop->getSchedules();
+			return response()->json($response,200);
+		}else{
+			return response()->json(['message'=>'Error, ud. no posee una barbería'],400);
+		}
+	} catch (\Throwable $th) {
+		\Log::debug($th);
+		abort(400);	
+	}
   }
 
   public function getBarbershop($barbershop_id)
   {
-    $barbershop = Barbershop::find($barbershop_id);
-    if(!$barbershop){
-      return response()->json([
-        'message'=>'Barbershop not found'
-      ],400);
-    }else{
-      $response = $barbershop->getData();
-      $products = $barbershop->products;
-      foreach($products as $product){
-        $product['images'] = $product->images;
-      }
-      $response['products'] = $products;
-      $response['schedules'] = $barbershop->getSchedules();
-
-      return response()->json($response,200);
-    }
+	try {
+		
+		$barbershop = Barbershop::find($barbershop_id);
+		if(!$barbershop){
+		  return response()->json(['message'=>'Barbería no encontrada'],400);
+		}else{
+		  $response = $barbershop->getData();
+		  $products = $barbershop->products;
+		  foreach($products as $product){
+			$product['images'] = $product->images;
+		  }
+		  $response['products'] = $products;
+		  $response['schedules'] = $barbershop->getSchedules();
+	
+		  return response()->json($response,200);
+		}
+	} catch (\Throwable $th) {
+		\Log::debug($th);
+		abort(400);	
+	}
 
   }
 
-  public function getBarbershops(Request $request)
+  public function getBarbershops()
   {
-    $user = auth('api')->user();
-    $country = $user->location->country;
-    $zip = $user->location->zip;
-
-    $barbershops = Barbershop::all();
-    $response = [];
-    foreach($barbershops as $barber){
-      $res = [];
-      $res['data'] = $barber->getData();
-      $res['schedules'] = $barber->getSchedules();
-      $response[] = $res;
+    try {
+      $barbershops = Barbershop::join('locations', 'locations.id', 'barbershops.location_id')
+      ->select('barbershops.*', 'locations.zip', 'locations.country')->get();
+      foreach($barbershops as $barbershop){
+        $barbershop['products'] = Product::where('barbershop_id', $barbershop->id)->get();
+        $barbershop['schedules'] = Schedule::where('barbershop_id', $barbershop->id)->get();
+      }
+      return response()->json($barbershops,200);
+    } catch (\Throwable $th) {
+      \Log::debug($th);
+      return response()->json(['message' =>'Error showing barbershops'], 400);
     }
-
-    return response()->json($response,200);
   }
 
   public function getProducts($barbershop_id)
   {
-    $products = Product::where('barbershop_id', $barbershop_id)->get();
-    if(count($products)){
-      foreach($products as $product){
-        $product['images'] = $product->images;
-      }
-      return response()->json($products,200);
-    }
-    else{
-      return response()->json([],200);
-    }
+    
+	try {
+		$products = Product::where('barbershop_id', $barbershop_id)->get();
+		if(count($products)){
+			foreach($products as $product){
+				$product['images'] = $product->images;
+			}
+			return response()->json($products,200);
+		} else{
+			return response()->json([],200);
+		}
+	  } catch (\Throwable $th) {
+		\Log::debug($th);
+		return response()->json(['message' =>'Error showing barbershops'], 400);
+	  }
   }
 
   public function storeProducts(Request $request)
@@ -110,55 +115,69 @@ class BarbershopController extends Controller
     if ($validator->fails()){
       return response()->json(['errors' => $validator->errors()],400);
     }
+    try {
+      DB::beginTransaction();
+      $user = auth()->user();
+      if(!$user || !$user->isBarber() || !$user->barbershop) abort(401);
+      $product = new Product;
+      $product->name = $request->name;
+      $product->description = $request->description;
+      $product->price = $request->price;
+      $product->hours = $request->hours;
+      $product->minutes = $request->minutes;
 
-    $user = auth('api')->user();
-    if(!$user || !$user->isBarber() || !$user->barbershop) abort(401);
-    $product = new Product;
-    $product->name = $request->name;
-    $product->description = $request->description;
-    $product->price = $request->price;
-    $product->hours = $request->hours;
-    $product->minutes = $request->minutes;
+      $product->barbershop()->associate($user->barbershop);
+      $product->save();
+      //Upload image
+      $image_path = $request->file("photo");
 
-    $product->barbershop()->associate($user->barbershop);
-    $product->save();
-    //Upload image
-    $image_path = $request->file("photo");
+      if ($image_path) {
+        $image_path_name = "products/".time().$image_path->getClientOriginalName();
+        Storage::disk('public')->put($image_path_name, file_get_contents($image_path));
+        $image= new ImageProduct();
+        $image->path = $image_path_name;
+        $image->product()->associate($product);
+        $image->save();
+      }else{
+        abort(400);
+      }
 
-    if ($image_path) {
-      $image_path_name = "products/".time().$image_path->getClientOriginalName();
-      Storage::disk('public')->put($image_path_name, file_get_contents($image_path));
-      $image= new ImageProduct();
-      $image->path = $image_path_name;
-      $image->product()->associate($product);
-      $image->save();
-    }else{
-      abort(400);
+      $products = $user->barbershop->products;
+      foreach($products as $product){
+        $product['images'] = $product->images;
+      }
+      DB::commit();
+
+      return response()->json([
+        'products'=>$products,
+        'message'=>'Se agregó un nuevo producto a su barbería'
+      ],200);
+    } catch (\Throwable $th) {
+      DB::rollback();
+      \Log::debug($th);
+      return response()->json(['message' =>'Error adding product'], 400);
     }
-
-    $products = $user->barbershop->products;
-    foreach($products as $product){
-      $product['images'] = $product->images;
-    }
-
-    return response()->json([
-      'products'=>$products,
-      'message'=>'Se agregó un nuevo producto a su barbería'
-    ],200);
   }
   public function destroyProducts($id)
   {
-    $user = auth('api')->user();
-    if(!$user || !$user->isBarber() || !$user->barbershop) abort(401);
-    $product = $user->barbershop->products()->find($id);
-
-    if(!$product) abort(400);
-
-    $product->delete();
-
-    return response()->json([
-      'message'=>'El producto fue eliminado de su barbería'
-    ],200);
+    try {
+      DB::beginTransaction();
+      $user = auth()->user();
+      if(!$user || !$user->isBarber() || !$user->barbershop) abort(401);
+      $product = $user->barbershop->products()->find($id);
+    
+      if(!$product) abort(400);
+    
+      $product->delete();
+      DB::commit();
+      return response()->json([
+        'message'=>'El producto fue eliminado de su barbería'
+      ],200);
+    } catch (\Throwable $th) {
+      DB::rollback();
+      \Log::debug($th);
+      return response()->json(['message' =>'Error deleting product'], 400);
+    }
   }
   public function store(Request $request)
   {
@@ -178,41 +197,48 @@ class BarbershopController extends Controller
     if($validator->fails()){
       return response()->json(['errors' => $validator->errors()]);
     }
-    $user = auth('api')->user();
-    if(!$user || !$user->isBarber() || $user->barbershop) abort(401);
+    try {
+      DB::beginTransaction();
+      $user = auth()->user();
+      if(!$user || !$user->isBarber() || $user->barbershop) abort(401);
+      $location = Location::create([
+        'zip' => $request->zip,
+        'country' => $request->country,
+        'address' => $request->address,
+        'city' => $request->city,
+        'state' => $request->state,
+      ]);
+      $barbershop = new Barbershop;
+      $barbershop->name = $request->name;
+      $barbershop->phone = $request->phone;
+      $barbershop->days = implode(",",$request->days);
+      $opens = $request->opens;
+      $closes = $request->closes;
+      $barbershop->location()->associate($location);
+      $barbershop->user()->associate($user);
+      $barbershop->save();
+      foreach ($opens as $key => $value) {
+          $schedule= new Schedule;
+          $schedule->open = $value;
+          $schedule->close = $closes[$key];
+          $schedule->barbershop()->associate($barbershop);
+          $schedule->save();
+      }
+      $response = $barbershop->getData();
+      $products = $barbershop->products;
+      foreach($products as $product){
+        $product['images'] = $product->images;
+      }
+      $response['products'] = $products;
+      $response['schedules'] = $barbershop->getSchedules();
+      DB::commit();
+      return response()->json($response,200);
 
-    $location = Location::create([
-      'zip' => $request->zip,
-      'country' => $request->country,
-      'address' => $request->address,
-      'city' => $request->city,
-      'state' => $request->state,
-    ]);
-    $barbershop = new Barbershop;
-    $barbershop->name = $request->name;
-    $barbershop->phone = $request->phone;
-    $barbershop->days = implode(",",$request->days);
-    $opens = $request->opens;
-    $closes = $request->closes;
-    $barbershop->location()->associate($location);
-    $barbershop->user()->associate($user);
-    $barbershop->save();
-    foreach ($opens as $key => $value) {
-        $schedule= new Schedule;
-        $schedule->open = $value;
-        $schedule->close = $closes[$key];
-        $schedule->barbershop()->associate($barbershop);
-        $schedule->save();
+    } catch (\Throwable $th) {
+      DB::rollback();
+      \Log::debug($th);
+      return response()->json(['message' =>'Error creating barbershop'], 400);
     }
-    $response = $barbershop->getData();
-    $products = $barbershop->products;
-    foreach($products as $product){
-      $product['images'] = $product->images;
-    }
-    $response['products'] = $products;
-    $response['schedules'] = $user->barbershop->getSchedules();
-    return response()->json($response,200);
-
     /*Upload image
      $image_path = $request->file('image_path');
      if ($image_path) {
@@ -229,26 +255,34 @@ class BarbershopController extends Controller
 
   public function getTurns()
   {
-    $user = auth('api')->user();
-
-    if(!$user || !$user->isBarber() || !$user->barbershop)
-    return response()->json([
-        'message'=>'Usted no tiene los permisos para esta acción'
-    ],400);
-    $turns = $user->barbershop->turns->where('created_at', '>=', Carbon::now()->subYears(1));
-    foreach($turns as $turn ){
-        $turn["ending"] = $turn->getEnding();
-        $product = $turn->product;
-        $product['images'] =$product->images;
-        $turn["product"] = $product;
-        $turn["data_user"] = $turn->user->dataUser;
-    }
-    return response()->json($turns,200);
+	try {		
+		$user = auth()->user();
+		if(!$user->barbershop){
+			return response()->json([
+				'message'=>'Usted no tiene los permisos para esta acción'
+			],400);
+		}
+		$turns = $user->barbershop->turns()
+		->join('users', 'turns.user_id', 'users.id')
+		->join('data_users', 'users.data_user_id', 'data_users.id')
+		->join('states', function($join) {
+			$join->on('states.turn_id', '=', 'turns.id')
+				 ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
+		})
+		->where('turns.created_at', '>=', Carbon::now()->subYears(1))
+		->select('turns.*','states.value as turn_state','data_users.phone as user_phone',
+			DB::raw("CONCAT(data_users.first_name,' ', data_users.last_name) as user_name"),
+		)->get();
+		return response()->json($turns,200);
+	} catch (\Throwable $th) {
+		\Log::debug($th);
+		return response()->json(['message' =>'Error, turns not found'], 400);
+	}
   }
 
   public function acceptTurn($turn_id)
   {
-    $user = auth('api')->user();
+    $user = auth()->user();
     if(!$user || !$user->isBarber() || !$user->barbershop)
     return response()->json([
       'message'=>'Usted no tiene los permisos para esta acción'
@@ -279,7 +313,7 @@ class BarbershopController extends Controller
 
   public function cancelTurn($turn_id)
   {
-    $user = auth('api')->user();
+    $user = auth()->user();
     if(!$user || !$user->isBarber() || !$user->barbershop)
       return response()->json([
           'message'=>'Usted no tiene los permisos para esta acción'
@@ -307,6 +341,19 @@ class BarbershopController extends Controller
     }
     return response()->json($turns,200);
   }
+  function showTurn($turn_id)
+  {
+      try {
+        $turn = Turn::findOrFail($turn_id);
+        $turn['barbershop'] = $turn->barbershop->getData();
+        $turn['product'] = $turn->product;
+        $turn['user'] = $turn->user->getData();
+        return response()->json($response, 200);
+      } catch (\Throwable $th) {
+		\Log::debug($th);
+		return response()->json(['message' =>'Error, turn not found'], 400);
+      }
+  }
 
 //************PENDING INTERFACE************
   public function update(Request $request)
@@ -322,7 +369,7 @@ class BarbershopController extends Controller
     if($validator->fails()){
       return response()->json(['errors' => $validator->errors()]);
     }
-    $user = auth('api')->user();
+    $user = auth()->user();
     if(!$user || !$user->isBarber()) abort(401);
 
     $user->barbershop->location->address =$request->address;
@@ -361,7 +408,7 @@ class BarbershopController extends Controller
     if($validator->fails()){
       return response()->json(['errors' => $validator->errors()]);
     }
-    $user = auth('api')->user();
+    $user = auth()->user();
     if( !$user || !$user->isBarber() || !$user->barbershop ) abort(401);
 
     $user->barbershop->days =   json_encode($request->days);
@@ -383,7 +430,7 @@ class BarbershopController extends Controller
     if($validator->fails()){
       return response()->json(['errors' => $validator->errors()]);
     }
-    $user = auth('api')->user();
+    $user = auth()->user();
     if( !$user || !$user->isBarber() || !$user->barbershop ) abort(401);
     $days = json_encode($request->days);
     $open = json_encode($request->open);

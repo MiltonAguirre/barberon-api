@@ -22,9 +22,9 @@ class Turn extends Model
     public function barbershop(){
         return $this->belongsto(Barbershop::class);
     }
-    public function state()
+    public function states()
     {
-        return $this->hasOne(State::class);
+        return $this->hasMany(State::class);
     }
     //Methods
     public function getEnding(){

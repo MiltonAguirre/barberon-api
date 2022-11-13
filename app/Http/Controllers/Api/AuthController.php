@@ -11,8 +11,9 @@ use App\Models\Role;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
-use Hash;
 
 class AuthController extends Controller
 {
@@ -35,42 +36,45 @@ class AuthController extends Controller
         if ($validator->fails()){
             return response()->json(['errors' => $validator->errors()]);
         }
-        $location = Location::create([
-          'zip' => $request->get('zip'),
-          'country' => $request->get('country'),
-        ]);
-        $dataUser = DataUser::create([
-          'first_name' => $request->get('first_name'),
-          'last_name' => $request->get('last_name'),
-        ]);
-        $role = Role::find($request->get('role'));
-
-        $user = new User();
-        $user->email = $request->get('email');
-        $user->password = bcrypt($request->get('password'));
-        $user->location()->associate($location);
-        $user->dataUser()->associate($dataUser);
-        $user->role()->associate($role);
-
-        $tokenResult = $user->createToken('Personal Access Token');
-        $user->last_conection = now();
-        $user->save();
-        $token = $tokenResult->token;
-        if ($request->remember_me) {
-            $token->expires_at = Carbon::now()->addWeeks(1);
+        try {
+            DB::beginTransaction();
+            $location = Location::create([
+            'zip' => $request->get('zip'),
+            'country' => $request->get('country'),
+            ]);
+            $dataUser = DataUser::create([
+            'first_name' => $request->get('first_name'),
+            'last_name' => $request->get('last_name'),
+            ]);
+            $role = Role::find($request->get('role'));
+    
+            $user = new User();
+            $user->email = $request->get('email');
+            $user->password = Hash::make($request->get('password'));
+            $user->location()->associate($location);
+            $user->dataUser()->associate($dataUser);
+            $user->role()->associate($role);
+            $user->last_conection = now();
+            $user->save();
+    
+            $token = $user->createToken('Personal Access Token');
+    
+            DB::commit();
+            return response()->json([
+                'user_id' => $user->id,
+                'role_id' => $user->role->id,
+                'first_name' => $user->dataUser->first_name,
+                'profile_img' => $user->dataUser->profile_img,
+                'token_type'   => 'Bearer',
+                'access_token' => $token->plainTextToken,
+            ], 201);
+        } catch (\Throwable $th) {
+            //throw $th;
+            DB::rollback();
+            \Log::debug($th);
+            return response()->json(['message' =>'Error creating user'], 400);
+            
         }
-        $token->save();
-        return response()->json([
-            'user_id' => $user->id,
-            'role_id' => $user->role->id,
-            'first_name' => $user->dataUser->first_name,
-            'profile_img' => $user->dataUser->profile_img,
-            'message' => 'Successfully created user!',
-            'token_type'   => 'Bearer',
-            'access_token' => $tokenResult->accessToken,
-            'expires_at'   => Carbon::parse($tokenResult->token->expires_at)
-                                    ->toDateTimeString()
-        ], 201);
     }
 
     public function login(Request $request)
@@ -79,59 +83,39 @@ class AuthController extends Controller
             'email'       => 'required|string',
             'password'    => 'required|string',
             'remember_me' => 'boolean',
-          ]);
-          if ($validator->fails()){
-              return response()->json(['errors' => $validator->errors()]);
-          }
-
-          // $credentials = request(['email', 'password']);
-          // if (!\Auth::guard('api')->check($credentials)) {
-          //     return response()->json([
-          //         'message' => 'Unauthorized'], 401);
-          // }
-          $user = User::where('email',$request->email)->first();
-          if (!$user){
-              return response()->json([
-                  'message' => 'Unauthorized'], 401);
-          }
-          //BUG ! ! ! !
-          // BUST BE Hash::check("password",bcrypt("password"))
-
-          if (!Hash::check($request->password,$user->password)){
-              return response()->json([
-                  'message' => 'Unauthorized'], 401);
-          }
-          $tokenResult = $user->createToken('Personal Access Token');
-          $user->last_conection = now();
-          $user->save();
-          $token = $tokenResult->token;
-          if ($request->remember_me) {
-              $token->expires_at = Carbon::now()->addWeeks(1);
-          }
-          $token->save();
+        ]);
+        if ($validator->fails()){
+            return response()->json(['errors' => $validator->errors()]);
+        }
+        $user = User::where('email',$request->email)->first();
+        if (!$user){
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+        if (!Hash::check($request->password,$user->password)){
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+        $token = $user->createToken('Personal Access Token');
+        
+        $user->last_conection = now();
+        $user->save();
         return response()->json([
-            'access_token' => $tokenResult->accessToken,
-            'token_type'   => 'Bearer',
-            'role_id'   => $user->role->id,
             'user_id'   => $user->id,
+            'role_id'   => $user->role->id,
             'first_name'   => $user->dataUser->first_name,
             'profile_img'   => $user->dataUser->profile_img,
-            'expires_at'   => Carbon::parse(
-                $tokenResult->token->expires_at)
-                    ->toDateTimeString(),
-        ]);
+            'token_type'   => 'Bearer',
+            'access_token' => $token->plainTextToken,
+        ], 200);
     }
 
-    public function logout(Request $request)
+    public function logout()
     {
-
-        $request->user()->token()->revoke();
-        return response()->json(['message' =>
-            'Successfully logged out']);
+        auth()->user()->tokens()->delete();
+        return response()->json(['message' =>'Successfully logged out']);
     }
 
-    public function user(Request $request)
+    public function user()
     {
-        return response()->json($request->user());
+        return response()->json(auth()->user());
     }
 }

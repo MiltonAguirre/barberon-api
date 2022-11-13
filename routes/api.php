@@ -18,32 +18,59 @@ use App\Http\Controllers\Api\BarbershopController;
 | is assigned the "api" middleware group. Enjoy building your API!
 |
 */
-Route::controller(AuthController::class)->prefix('auth')->group(function () {
-    Route::post('login', 'login');
+Route::group([
+    'controller' => AuthController::class,
+    'prefix' => 'auth'
+], function () {
+    Route::post('login', 'login')->name('login');
     Route::post('signup', 'signup'); 
     Route::get('logout', 'logout'); 
 });
 
 //USER CLIENT
-Route::controller(UserController::class)->middleware('auth:api')->prefix('users')->group(function () {
+Route::group([
+    'controller' => UserController::class,
+    'middleware' => ['auth:sanctum'],
+    'prefix' => 'users'
+],function () {
     Route::get('/profile', 'show');
-    Route::get('/profile/{user_id}', 'getUser');
-    Route::get('/turns', 'getTurns');
-    Route::get('/turns/{turn_id}', 'showTurn');    
-    Route::post('/turns', 'storeTurn');
-    Route::post('/turns/cancel/{turn_id}', 'cancelTurn');
+    Route::group([
+        'prefix'=>'turns', 
+        'middleware'=>['CheckRole:client']
+    ], function(){
+        Route::get('/', 'getTurns');
+        Route::post('/', 'storeTurn');
+        Route::get('/show/{turn_id}', 'showTurn');    
+        Route::post('/cancel/{turn_id}', 'cancelTurn');
+    });
 });
 
-//USER BARBER
-Route::controller(BarbershopController::class)->middleware('auth:api')->prefix('barbershops')->group(function () {
-    Route::post('/', 'store');
+//BARBERSHOPS
+Route::group([
+    'controller' => BarbershopController::class,
+    'prefix' => 'barbershops'
+],function () {
     Route::get('/', 'getBarbershops');
-    Route::get('/barbershop/my-barbershop', 'getMyBarbershop');
-    Route::get('/{barbershop_id}', 'getBarbershop');
-    Route::get('/turns/all', 'getTurns');
-    Route::post('/turns/accept/{turn_id}', 'acceptTurn');
-    Route::post('/turns/cancel/{turn_id}', 'cancelTurn');
-    Route::get('/products', 'getProducts');
-    Route::post('/products', 'storeProducts');
-    Route::delete('/products/{product_id}', 'destroyProducts');
+    Route::get('/show/{barbershop_id}', 'getBarbershop');
+    Route::group(['middleware'=>'auth:sanctum'], function(){
+        Route::post('/', 'store');
+        Route::get('/my-barbershop', 'getMyBarbershop');
+        //PRODUCTS
+        Route::group(['prefix'=>'products'], function(){
+            Route::get('/{barbershop_id}', 'getProducts');
+            Route::group(['middleware' => ['CheckRole:barber']], function(){
+                Route::post('/', 'storeProducts');
+                Route::delete('/{product_id}', 'destroyProducts');
+            });
+        });
+        //TURNS OF BARBERSHOP
+        Route::prefix('turns')->group(function(){
+            Route::get('/show/{turn_id}', 'showTurn');
+            Route::group(['middleware' => ['CheckRole:barber']], function(){
+                Route::post('/accept/{turn_id}', 'acceptTurn');
+                Route::post('/cancel/{turn_id}', 'cancelTurn');
+                Route::get('/all', 'getTurns');
+            });
+        });
+    });
 });

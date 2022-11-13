@@ -53,7 +53,7 @@ class User extends Authenticatable
         return $this->hasOne(Barbershop::class);
     }
     public function turns(){
-        return $this->hasMany(Turn::class)->orderBy('start', 'DESC');
+        return $this->hasMany(Turn::class);
     }
     public function isBarber(){
         return $this->role->id == 1;
