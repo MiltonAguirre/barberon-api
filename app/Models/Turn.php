@@ -32,5 +32,9 @@ class Turn extends Model
       $ending->add(new DateInterval('PT'. (int)$this->product->hours . 'H' . $this->product->minutes . 'M'));
       return $ending->format('Y-m-d H:i');
     }
+    public function lastState()
+    {
+      return $this->states()->latest()->first();
+    }
 
 }

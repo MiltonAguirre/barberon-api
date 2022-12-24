@@ -108,10 +108,19 @@ class AuthController extends Controller
         ], 200);
     }
 
-    public function logout()
+    public function logout(Request $request)
     {
-        auth()->user()->tokens()->delete();
-        return response()->json(['message' =>'Successfully logged out']);
+        DB::beginTransaction();
+        try {
+            
+            auth()->user()->tokens()->delete();
+            DB::commit();
+            return response()->json(['message' =>'Successfully logged out']);
+        } catch (\Throwable $th) {
+            DB::rollback();
+            \Log::debug($th);
+            return response()->json(['message' =>'Error revoking token'], 400);
+        }
     }
 
     public function user()

@@ -16,6 +16,7 @@ return new class extends Migration
         Schema::create('states', function (Blueprint $table) {
             $table->id();
             $table->integer('value')->default(1);
+            $table->string('comment')->nullable();
             $table->unsignedBigInteger('turn_id');
             $table->timestamps();
         });

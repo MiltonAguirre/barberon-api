@@ -8,6 +8,7 @@ use App\Models\ImageProduct;
 use App\Models\Location;
 use App\Models\Product;
 use App\Models\Schedule;
+use App\Models\State;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -21,48 +22,47 @@ class BarbershopController extends Controller
 
   public function getMyBarbershop()
   {
-	try {
-		$user = auth()->user();
-		if($user->barbershop){
-			$response = $user->barbershop->getData();
-			$products = $user->barbershop->products;
-			foreach($products as $product){
-				$product['images'] = $product->images;
-			}
-			$response['products'] = $products;
-			$response['schedules'] = $user->barbershop->getSchedules();
-			return response()->json($response,200);
-		}else{
-			return response()->json(['message'=>'Error, ud. no posee una barbería'],400);
-		}
-	} catch (\Throwable $th) {
-		\Log::debug($th);
-		abort(400);	
-	}
+    try {
+      $user = auth()->user();
+      if($user->barbershop){
+        $response = $user->barbershop->getData();
+        $products = $user->barbershop->products;
+        foreach($products as $product){
+          $product['images'] = $product->images;
+        }
+        $response['products'] = $products;
+        $response['schedules'] = $user->barbershop->getSchedules();
+        return response()->json($response,200);
+      }else{
+        return response()->json(['message'=>'Error, ud. no posee una barbería'],400);
+      }
+    } catch (\Throwable $th) {
+      \Log::debug($th);
+      abort(400);	
+    }
   }
 
   public function getBarbershop($barbershop_id)
   {
-	try {
-		
-		$barbershop = Barbershop::find($barbershop_id);
-		if(!$barbershop){
-		  return response()->json(['message'=>'Barbería no encontrada'],400);
-		}else{
-		  $response = $barbershop->getData();
-		  $products = $barbershop->products;
-		  foreach($products as $product){
-			$product['images'] = $product->images;
-		  }
-		  $response['products'] = $products;
-		  $response['schedules'] = $barbershop->getSchedules();
-	
-		  return response()->json($response,200);
-		}
-	} catch (\Throwable $th) {
-		\Log::debug($th);
-		abort(400);	
-	}
+    try {
+      $barbershop = Barbershop::find($barbershop_id);
+      if(!$barbershop){
+        return response()->json(['message'=>'Barbería no encontrada'],400);
+      }else{
+        $response = $barbershop->getData();
+        $products = $barbershop->products;
+        foreach($products as $product){
+        $product['images'] = $product->images;
+        }
+        $response['products'] = $products;
+        $response['schedules'] = $barbershop->getSchedules();
+    
+        return response()->json($response,200);
+      }
+    } catch (\Throwable $th) {
+      \Log::debug($th);
+      abort(400);	
+    }
 
   }
 
@@ -72,7 +72,11 @@ class BarbershopController extends Controller
       $barbershops = Barbershop::join('locations', 'locations.id', 'barbershops.location_id')
       ->select('barbershops.*', 'locations.zip', 'locations.country')->get();
       foreach($barbershops as $barbershop){
-        $barbershop['products'] = Product::where('barbershop_id', $barbershop->id)->get();
+        $products = Product::where('barbershop_id', $barbershop->id)->get();
+        foreach($products as $product){
+          $product['images'] = $product->images;
+        }
+        $barbershop['products'] = $products;
         $barbershop['schedules'] = Schedule::where('barbershop_id', $barbershop->id)->get();
       }
       return response()->json($barbershops,200);
@@ -84,21 +88,20 @@ class BarbershopController extends Controller
 
   public function getProducts($barbershop_id)
   {
-    
-	try {
-		$products = Product::where('barbershop_id', $barbershop_id)->get();
-		if(count($products)){
-			foreach($products as $product){
-				$product['images'] = $product->images;
-			}
-			return response()->json($products,200);
-		} else{
-			return response()->json([],200);
-		}
-	  } catch (\Throwable $th) {
-		\Log::debug($th);
-		return response()->json(['message' =>'Error showing barbershops'], 400);
-	  }
+    try {
+      $products = Product::where('barbershop_id', $barbershop_id)->get();
+      if(count($products)){
+        foreach($products as $product){
+          $product['images'] = $product->images;
+        }
+        return response()->json($products,200);
+      } else{
+        return response()->json([],200);
+      }
+    } catch (\Throwable $th) {
+      \Log::debug($th);
+      return response()->json(['message' =>'Error showing barbershops'], 400);
+    }
   }
 
   public function storeProducts(Request $request)
@@ -118,7 +121,9 @@ class BarbershopController extends Controller
     try {
       DB::beginTransaction();
       $user = auth()->user();
-      if(!$user || !$user->isBarber() || !$user->barbershop) abort(401);
+      if(!$user->barbershop) {
+        return response()->json("Error, you dont have a barbershop", 400);
+      }
       $product = new Product;
       $product->name = $request->name;
       $product->description = $request->description;
@@ -139,7 +144,7 @@ class BarbershopController extends Controller
         $image->product()->associate($product);
         $image->save();
       }else{
-        abort(400);
+        return response()->json("Error, you need add a picture", 400);
       }
 
       $products = $user->barbershop->products;
@@ -255,91 +260,96 @@ class BarbershopController extends Controller
 
   public function getTurns()
   {
-	try {		
-		$user = auth()->user();
-		if(!$user->barbershop){
-			return response()->json([
-				'message'=>'Usted no tiene los permisos para esta acción'
-			],400);
-		}
-		$turns = $user->barbershop->turns()
-		->join('users', 'turns.user_id', 'users.id')
-		->join('data_users', 'users.data_user_id', 'data_users.id')
-		->join('states', function($join) {
-			$join->on('states.turn_id', '=', 'turns.id')
-				 ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
-		})
-		->where('turns.created_at', '>=', Carbon::now()->subYears(1))
-		->select('turns.*','states.value as turn_state','data_users.phone as user_phone',
-			DB::raw("CONCAT(data_users.first_name,' ', data_users.last_name) as user_name"),
-		)->get();
-		return response()->json($turns,200);
-	} catch (\Throwable $th) {
-		\Log::debug($th);
-		return response()->json(['message' =>'Error, turns not found'], 400);
-	}
+    try {		
+      $user = auth()->user();
+      if(!$user->barbershop){
+        return response()->json([
+          'message'=>'Usted no tiene los permisos para esta acción'
+        ],400);
+      }
+      $turns = $user->barbershop->turns()
+      ->join('users', 'turns.user_id', 'users.id')
+      ->join('data_users', 'users.data_user_id', 'data_users.id')
+      ->join('states', function($join) {
+        $join->on('states.turn_id', '=', 'turns.id')
+          ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
+      })
+      ->where('turns.created_at', '>=', Carbon::now()->subYears(1))
+      ->select('turns.*','states.value as turn_state','data_users.phone as user_phone',
+        DB::raw("CONCAT(data_users.first_name,' ', data_users.last_name) as user_name"),
+      )->get();
+      foreach ($turns as $turn) {
+        $turn["state"] = $turn->lastState()->name();
+      }
+      return response()->json($turns,200);
+    } catch (\Throwable $th) {
+      \Log::debug($th);
+      return response()->json(['message' =>'Error, turns not found'], 400);
+    }
   }
 
-  public function acceptTurn($turn_id)
+  public function acceptTurn(Request $request)
   {
-    $user = auth()->user();
-    if(!$user || !$user->isBarber() || !$user->barbershop)
-    return response()->json([
-      'message'=>'Usted no tiene los permisos para esta acción'
-    ],400);
-    $turn = $user->barbershop->turns()->findOrFail($turn_id);
-    if($user->barbershop->id !== $turn->barbershop->id)
-    return response()->json([
-      'message'=>'Usted no tiene los permisos para esta acción'
-    ],400);
-    if($turn->state===1){
-      $turn->state=2;
-      $turn->save();
-    }else{
-      return response()->json([
-        'message'=>'El estado del turno no es correcto para esta acción'
-      ],400);
+    $validator = Validator::make($request->all(), [
+      'turn_id' => 'required|numeric|min:1',
+    ]);
+    if($validator->fails()){
+      return response()->json(['errors' => $validator->errors()]);
+    } 
+    try {
+      DB::beginTransaction();
+      $user = auth()->user();
+      if(!$user->barbershop){
+        return response()->json([
+          'message'=>'Usted no tiene los permisos para esta acción'
+        ],400);
+      }
+      $turn = $user->barbershop->turns()->findOrFail($request->turn_id);
+      if($turn->lastState()->value!==1){
+        return response()->json([
+          'message'=>'El estado del turno no es correcto para esta acción'
+        ],400);
+      }
+      $state = State::create(array_merge($request->all(), ['value'=>2]));
+      DB::commit();
+      return response()->json(["message"=>"Turno aceptado"],200);
+    } catch (\Throwable $th) {
+      DB::rollback();
+      \Log::debug($th);
+      return response()->json(['message' =>'Error, turns not found'], 400);
     }
-    $turns = $user->barbershop->turns->where('created_at', '>=', Carbon::now()->subYears(1));
-    foreach($turns as $turn ){
-        $turn["ending"] = $turn->getEnding();
-        $product = $turn->product;
-        $product['images'] =$product->images;
-        $turn["product"] = $product;
-        $turn["data_user"] = $turn->user->dataUser;
-    }
-    return response()->json($turns,200);
    }
 
-  public function cancelTurn($turn_id)
+  public function cancelTurn($turn_id, $comment = null)
   {
-    $user = auth()->user();
-    if(!$user || !$user->isBarber() || !$user->barbershop)
-      return response()->json([
-          'message'=>'Usted no tiene los permisos para esta acción'
-      ],400);
-    $turn = $user->barbershop->turns()->findOrFail($turn_id);
-    if($user->barbershop->id !== $turn->barbershop->id)
-      return response()->json([
-          'message'=>'Usted no tiene los permisos para esta acción'
-      ],400);
-    if($turn->state===1 || $turn->state===2 ){
-      $turn->state=0;
-      $turn->save();
-    }else{
-      return response()->json([
+    $validator = Validator::make($request->all(), [
+      'turn_id' => 'required|numeric|min:1',
+    ]);
+    if($validator->fails()){
+      return response()->json(['errors' => $validator->errors()]);
+    }
+    try {
+      DB::beginTransaction();
+      $user = auth()->user();
+      if(!$user->barbershop){
+        return response()->json([
+            'message'=>'Usted no tiene los permisos para esta acción'
+        ],400);
+      }    
+      $turn = $user->barbershop->turns()->findOrFail($request->turn_id);
+      if(!$turn->lastState()->value){
+        return response()->json([
           'message'=>'El estado del turno no es correcto para esta acción'
-      ],400);
+        ],400);
+      }
+      $state = State::create(array_merge($request->all(), ['value'=>0]));
+      DB::commit();
+      return response()->json(["message"=>"Turno cancelado"],200);
+    } catch (\Throwable $th) {
+      DB::rollback();
+      \Log::debug($th);
+      return response()->json(['message' =>'Error, turns not found'], 400);
     }
-    $turns = $user->barbershop->turns->where('created_at', '>=', Carbon::now()->subYears(1));
-    foreach($turns as $turn ){
-        $turn["ending"] = $turn->getEnding();
-        $product = $turn->product;
-        $product['images'] =$product->images;
-        $turn["product"] = $product;
-        $turn["data_user"] = $turn->user->dataUser;
-    }
-    return response()->json($turns,200);
   }
   function showTurn($turn_id)
   {
@@ -350,8 +360,8 @@ class BarbershopController extends Controller
         $turn['user'] = $turn->user->getData();
         return response()->json($response, 200);
       } catch (\Throwable $th) {
-		\Log::debug($th);
-		return response()->json(['message' =>'Error, turn not found'], 400);
+        \Log::debug($th);
+        return response()->json(['message' =>'Error, turn not found'], 400);
       }
   }
 

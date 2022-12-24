@@ -6,15 +6,15 @@ use Illuminate\Database\Eloquent\Model;
 
 class State extends Model
 {
-    const NAMES = ['canceled', 'pending', 'confirmed', 'finished'];
-    protected $fillable = ['value', 'turn_id'];
+    const NAMES = ['canceled', 'pending', 'accepted', 'finished'];
+    protected $fillable = ['comment', 'value', 'turn_id'];
   
     public function turn(){
       return $this->belongsto(Turn::class);
     }
     public function name()
     {
-      return NAMES[$this->value];
+      return $this::NAMES[$this->value];
     }
     
 }

@@ -24,7 +24,7 @@ Route::group([
 ], function () {
     Route::post('login', 'login')->name('login');
     Route::post('signup', 'signup'); 
-    Route::get('logout', 'logout'); 
+    Route::get('logout', 'logout')->middleware('auth:sanctum');
 });
 
 //USER CLIENT
@@ -65,10 +65,10 @@ Route::group([
         });
         //TURNS OF BARBERSHOP
         Route::prefix('turns')->group(function(){
-            Route::get('/show/{turn_id}', 'showTurn');
+            //Route::get('/show/{turn_id}', 'showTurn');
             Route::group(['middleware' => ['CheckRole:barber']], function(){
-                Route::post('/accept/{turn_id}', 'acceptTurn');
-                Route::post('/cancel/{turn_id}', 'cancelTurn');
+                Route::post('/accept', 'acceptTurn');
+                Route::post('/cancel', 'cancelTurn');
                 Route::get('/all', 'getTurns');
             });
         });
