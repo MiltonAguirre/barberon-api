@@ -14,67 +14,10 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
-use DateInterval;
-use DateTime;
 use Validator;
 
 class UserController extends Controller
 {
-    /**
-     * HELPERS
-     */
-    function isWorking($barbershop, $date, $hours)
-    {
-        /**
-         * CHECK WORK SCHEDULES
-         */
-        $in_work = false;
-        $days = explode(",",$barbershop->days);
-        $start = getDate(strtotime($date));
-        $end = $start['hours']+$hours;
-        if($days[$start['wday']]){
-            foreach($barbershop->schedules as $schedule){
-                if($schedule->open <= $start['hours'] && $schedule->close > $end)
-                    $in_work = true;
-            }
-        }
-        return $in_work;
-    }
-    function checkAvailability($product, $date)
-    {
-        /**
-         * CHECK ALL TURNS FOR COINCIDENS
-         */
-        $available = true;
-        $start = date('Y-m-d', strtotime($date));
-        $newStart = new DateTime($date);
-        $newEnd = new DateTime($date);
-        
-        $newInterval = new DateInterval('PT' . (int)$product->hours . 'H' . $product->minutes . 'M');
-        $turnsActive = Turn::join('barbershops', 'turns.barbershop_id', 'barbershops.id')
-                        ->join('states', function($join) {
-                            $join->on('states.turn_id', '=', 'turns.id')
-                                ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
-                        })
-                        ->where('barbershops.id', $product->barbershop->id)
-                        ->where('states.value', '>=', 1)
-                        ->whereDate('turns.start',$start)
-                        ->select('turns.*','states.value as turn_state')
-                        ->get();
-        $newEnd->add($newInterval);
-        foreach($turnsActive as $turnActive){
-            $turnActiveStart = new DateTime($turnActive->start);
-            $turnActiveEnd = $turnActive->getEnding();
-            // Check availability
-            if(($newStart >= $turnActiveStart && $newStart < $turnActiveEnd)
-                    || ($newEnd > $turnActiveStart && $newEnd <= $turnActiveEnd))
-                    $available = false;
-        }
-        return $available;
-    }
-    /**
-     * END OF HELPERS
-     */
     function show()
     {
         $user = auth()->user();
@@ -91,20 +34,17 @@ class UserController extends Controller
             ]);
             if($validator->fails()){
                 return response()->json(['errors' => $validator->errors()]);
-            }
-
-            DB::beginTransaction();        
+            }        
             $product = Product::findOrFail($request->product_id);
             $date_start = $request->start;
-
-            $in_work = $this->isWorking($product->barbershop, $date_start, $product->hours);
-            if(!$in_work){
+            if(!barbershopIsOpen($product->barbershop, $date_start, $product->hours)){
                 return response()->json(['message'=>'Error, turno fuera del horario de atencion'],400);
             }
-            $available = $this->checkAvailability($product, $date_start);
+            $available = checkShiftAvailability($product, $date_start);
             if(!$available){
                 return response()->json(['message'=>'Error, el horario elegido no esta disponible'],400);
             }
+            DB::beginTransaction();
             $user = auth()->user();
             $new_turn = new Turn();
             $new_turn->start = $date_start;
@@ -117,7 +57,7 @@ class UserController extends Controller
             $state->save();
             $turns = $user->turns->where('created_at', '>=', Carbon::now()->subYears(1));
             foreach($turns as $turn ){
-                $turn["ending"] = $turn->getEnding();
+                $turn["ending"] = $turn->getEnd();
                 $turn["barbershop"] = $turn->barbershop->getData();
             }
             DB::commit();
@@ -125,7 +65,7 @@ class UserController extends Controller
         } catch (\Throwable $th) {
             DB::rollback();
             \Log::debug($th);
-            abort(400);
+            return response()->json(['message' => $th->getMessage()], 400);
         }
     }
 
@@ -134,7 +74,7 @@ class UserController extends Controller
         try {
             $turns = auth()->user()->turns->where('created_at', '>=', Carbon::now()->subYears(1));
             foreach($turns as $turn ){
-                    $turn["ending"] = $turn->getEnding();
+                    $turn["ending"] = $turn->getEnd();
                     $barbershop = $turn->barbershop;
                     $barbershop['location'] = $barbershop->location;
                     $turn["barbershop"] = $barbershop;
@@ -142,7 +82,7 @@ class UserController extends Controller
             return response()->json($turns,200);
         } catch (\Throwable $th) {
             \Log::debug($th);
-            abort(400);
+            return response()->json(['message' => $th->getMessage()], 400);
         }
      }
 
@@ -169,7 +109,7 @@ class UserController extends Controller
             
             $turns = $user->turns->where('created_at', '>=', Carbon::now()->subYears(1));
             foreach($turns as $turn ){
-                    $turn["ending"] = $turn->getEnding();
+                    $turn["ending"] = $turn->getEnd();
                     $barbershop = $turn->barbershop;
                     $barbershop['location'] = $barbershop->location;
                     $turn["barbershop"] = $barbershop;
@@ -179,7 +119,7 @@ class UserController extends Controller
         } catch (\Throwable $th) {
             DB::rollback();
             \Log::debug($th);
-            abort(400);
+            return response()->json(['message' => $th->getMessage()], 400);
         } 
     }
     function showTurn($turn_id)

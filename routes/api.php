@@ -50,8 +50,10 @@ Route::group([
     'controller' => BarbershopController::class,
     'prefix' => 'barbershops'
 ],function () {
+    /* Public */
     Route::get('/', 'getBarbershops');
     Route::get('/show/{barbershop_id}', 'getBarbershop');
+    /* Authenticated */
     Route::group(['middleware'=>'auth:sanctum'], function(){
         Route::post('/', 'store');
         Route::get('/my-barbershop', 'getMyBarbershop');

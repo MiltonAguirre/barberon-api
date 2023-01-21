@@ -27,7 +27,7 @@ class Turn extends Model
         return $this->hasMany(State::class);
     }
     //Methods
-    public function getEnding(){
+    public function getEnd(){
       $ending = new DateTime($this->start);
       $ending->add(new DateInterval('PT'. (int)$this->product->hours . 'H' . $this->product->minutes . 'M'));
       return $ending->format('Y-m-d H:i');
