@@ -3,8 +3,6 @@ use App\Color;
 use App\ForeignExchange;
 use App\Models\Turn;
 use Illuminate\Support\Facades\DB;
-use DateInterval;
-use DateTime;
 
 function imBarber(){
     return auth()->user()->role->name=="barber";
@@ -29,32 +27,52 @@ function barbershopIsOpen($barbershop, $date, $hours)
 }
 function checkShiftAvailability($product, $date)
 {
-    /*** CHECK ALL TURNS FOR COINCIDENS   */
-    $available = true;
     $start = date('Y-m-d', strtotime($date));
-    $newStart = new DateTime($date);
-    $newEnd = new DateTime($date);
-    $newInterval = new DateInterval('PT' . (int)$product->hours . 'H' . $product->minutes . 'M');
-    $newEnd->add($newInterval);
-    
-    //Get turns active for this date
-    $turnsActive = Turn::join('barbershops', 'turns.barbershop_id', 'barbershops.id')
-                    ->join('states', function($join) {
+    //Get turns active for this date &
+    //Check availability for this product        
+    $turnsActive = Turn::join('states', function($join) {
                         $join->on('states.turn_id', '=', 'turns.id')
                             ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
                     })
-                    ->where('barbershops.id', $product->barbershop->id)
+                    ->where('turns.barbershop_id', $product->barbershop->id)
                     ->where('states.value', '>=', 1)
-                    ->whereDate('turns.start',$start)
+                    ->where('turns.start', '>=', $start)
+                    ->where('turns.start','<', date('Y-m-d H:i:s', strtotime($start . ' + ' . $product->hours. 'hours + '. $product->minutes . ' minutes')))
                     ->select('turns.*','states.value as turn_state')
                     ->get();
-    //Check availability for this product        
-    foreach($turnsActive as $turnActive){
-        $turnActiveStart = new DateTime($turnActive->start);
-        $turnActiveEnd = $turnActive->getEnd();
-        if(($newStart >= $turnActiveStart && $newStart < $turnActiveEnd)
-                || ($newEnd > $turnActiveStart && $newEnd <= $turnActiveEnd))
-                $available = false;
+    if(!count($turnsActive)){
+        return true;
     }
-    return $available;
+    return false;
+}
+
+function sendNotify($fields)
+{
+   try {
+    \Log::info("Send notify: ");
+    $url = 'https://fcm.googleapis.com/fcm/send';
+    $server_key = env('FCM_SERVER_KEY');
+
+    $headers = array(
+        'Authorization: key=' . $server_key,
+        'Content-Type: application/json'
+    );
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($fields));
+
+    $result = curl_exec($ch);
+    curl_close($ch);
+
+    \Log::debug('NOTI RES::::\n\n\n');
+    \Log::debug($result);
+    \Log::debug('NOTI RES::::\n\n\n');
+   } catch (\Exception $e) {
+    \Log::error($e->getMessage());
+    dd($e);
+   }
 }

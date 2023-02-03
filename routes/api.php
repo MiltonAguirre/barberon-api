@@ -27,13 +27,14 @@ Route::group([
     Route::get('logout', 'logout')->middleware('auth:sanctum');
 });
 
-//USER CLIENT
+//USER
 Route::group([
     'controller' => UserController::class,
     'middleware' => ['auth:sanctum'],
     'prefix' => 'users'
 ],function () {
     Route::get('/profile', 'show');
+    Route::post('/token-device', 'storeTokenDevice');
     Route::group([
         'prefix'=>'turns', 
         'middleware'=>['CheckRole:client']

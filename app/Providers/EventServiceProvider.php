@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Events\StoreTurn;
+use App\Events\StoreBarbershopEvent;
+use App\Listeners\SendBarbershopNotification;
+use App\Listeners\SendTurnNotification;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -18,6 +22,12 @@ class EventServiceProvider extends ServiceProvider
         Registered::class => [
             SendEmailVerificationNotification::class,
         ],
+        StoreTurn::class => [
+            SendTurnNotification::class
+        ],
+        StoreBarbershopEvent::class => [
+            SendBarbershopNotification::class
+        ]
     ];
 
     /**

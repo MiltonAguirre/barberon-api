@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Api;
-
+use App\Events\StoreBarbershopEvent;
 use App\Http\Controllers\Controller;
 use App\Models\Barbershop;
 use App\Models\ImageProduct;
@@ -9,6 +9,8 @@ use App\Models\Location;
 use App\Models\Product;
 use App\Models\Schedule;
 use App\Models\State;
+use App\Models\TokenDevice;
+use App\Services\BarbershopService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -19,6 +21,19 @@ use Validator;
 
 class BarbershopController extends Controller
 {
+  use BarbershopService;
+
+
+  public function getBarbershops()
+  {
+    try {
+      $barbershops = $this->serviceGetBarbershops();
+      return response()->json($barbershops,200);
+    } catch (\Throwable $th) {
+      \Log::debug($th);
+      return response()->json(['message' =>'Error showing barbershops'], 400);
+    }
+  }
 
   public function getMyBarbershop()
   {
@@ -52,7 +67,7 @@ class BarbershopController extends Controller
         $response = $barbershop->getData();
         $products = $barbershop->products;
         foreach($products as $product){
-        $product['images'] = $product->images;
+          $product['images'] = $product->images;
         }
         $response['products'] = $products;
         $response['schedules'] = $barbershop->getSchedules();
@@ -65,27 +80,6 @@ class BarbershopController extends Controller
     }
 
   }
-
-  public function getBarbershops()
-  {
-    try {
-      $barbershops = Barbershop::join('locations', 'locations.id', 'barbershops.location_id')
-      ->select('barbershops.*', 'locations.zip', 'locations.country')->get();
-      foreach($barbershops as $barbershop){
-        $products = Product::where('barbershop_id', $barbershop->id)->get();
-        foreach($products as $product){
-          $product['images'] = $product->images;
-        }
-        $barbershop['products'] = $products;
-        $barbershop['schedules'] = Schedule::where('barbershop_id', $barbershop->id)->get();
-      }
-      return response()->json($barbershops,200);
-    } catch (\Throwable $th) {
-      \Log::debug($th);
-      return response()->json(['message' =>'Error showing barbershops'], 400);
-    }
-  }
-
   public function getProducts($barbershop_id)
   {
     try {
@@ -168,10 +162,10 @@ class BarbershopController extends Controller
     try {
       DB::beginTransaction();
       $user = auth()->user();
-      if(!$user || !$user->isBarber() || !$user->barbershop) abort(401);
-      $product = $user->barbershop->products()->find($id);
-    
-      if(!$product) abort(400);
+      if(!$user || !$user->isBarber() || !$user->barbershop) 
+      return response()->json(['message' =>'Error deleting product'], 400);
+
+      $product = $user->barbershop->products()->findOrFail($id);
     
       $product->delete();
       DB::commit();
@@ -236,6 +230,7 @@ class BarbershopController extends Controller
       }
       $response['products'] = $products;
       $response['schedules'] = $barbershop->getSchedules();
+      event(new StoreBarbershopEvent);
       DB::commit();
       return response()->json($response,200);
 

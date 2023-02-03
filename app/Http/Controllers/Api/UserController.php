@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\StoreTurn;
 use App\Http\Controllers\Controller;
 use App\Models\Barber;
 use App\Models\Product;
 use App\Models\State;
 use App\Models\Turn;
+use App\Models\TokenDevice;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -61,6 +63,7 @@ class UserController extends Controller
                 $turn["barbershop"] = $turn->barbershop->getData();
             }
             DB::commit();
+            event(new StoreTurn);
             return response()->json($turns,200);
         } catch (\Throwable $th) {
             DB::rollback();
@@ -130,5 +133,34 @@ class UserController extends Controller
         $response['product'] = $turn->product;
         $response['user'] = $turn->user->getData();
         return response()->json($response, 200);
+    }
+    function storeTokenDevice(Request $request)
+    {
+        \Log::debug("Store Token Device:  ".$request->fcm_token);
+
+        $validator = Validator::make($request->all(), [
+            'fcm_token' => 'required|string|min:20|max:200'
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()], 400);
+        }
+        try {
+            DB::beginTransaction();
+            $alreadyRegistered = TokenDevice::where('user_id', auth()->user()->id)->where('token', $request->fcm_token)->count();
+            if($alreadyRegistered){
+                return response()->json(['message'=>'Device is already register'],400);
+            }else{
+                TokenDevice::create([
+                    'token' =>$request->fcm_token,
+                    'user_id' => auth()->user()->id,
+                ]);
+                DB::commit();
+                return response()->json(['message'=>'Successfully device register'],200);
+            }
+        } catch (\Exception $e) {
+            DB::rollback();
+            \Log::error("Error fmc_token device ".$e->getMessage()." in file ".$e->getFile()."@".$e->getLine());
+            return response()->json(['message'=>'Error, something went wrong'],400);
+        }
     }
 }
