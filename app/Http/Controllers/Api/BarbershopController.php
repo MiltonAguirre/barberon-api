@@ -27,7 +27,7 @@ class BarbershopController extends Controller
   public function getBarbershops()
   {
     try {
-      $barbershops = $eis->serviceGetBarbershops();
+      $barbershops = $this->serviceGetBarbershops();
       return response()->json($barbershops,200);
     }catch (\Exception $e) {
       \Log::debug($e->getMessage());
