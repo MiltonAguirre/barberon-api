@@ -27,11 +27,11 @@ class BarbershopController extends Controller
   public function getBarbershops()
   {
     try {
-      $barbershops = $this->serviceGetBarbershops();
+      $barbershops = $eis->serviceGetBarbershops();
       return response()->json($barbershops,200);
-    } catch (\Throwable $th) {
-      \Log::debug($th);
-      return response()->json(['message' =>'Error showing barbershops'], 400);
+    }catch (\Exception $e) {
+      \Log::debug($e->getMessage());
+      return response()->json(['message' => $e->getMessage()], 400);
     }
   }
 
@@ -39,7 +39,9 @@ class BarbershopController extends Controller
   {
     try {
       $user = auth()->user();
-      if($user->barbershop){
+      if(!$user->barbershop){
+        return response()->json(['message'=>'Error, ud. no posee una barbería'],400);
+      }else{
         $response = $user->barbershop->getData();
         $products = $user->barbershop->products;
         foreach($products as $product){
@@ -48,12 +50,10 @@ class BarbershopController extends Controller
         $response['products'] = $products;
         $response['schedules'] = $user->barbershop->getSchedules();
         return response()->json($response,200);
-      }else{
-        return response()->json(['message'=>'Error, ud. no posee una barbería'],400);
       }
-    } catch (\Throwable $th) {
-      \Log::debug($th);
-      abort(400);	
+    }catch (\Exception $e) {
+      \Log::debug($e->getMessage());
+      return response()->json(['message' => $e->getMessage()], 400);
     }
   }
 
@@ -74,9 +74,9 @@ class BarbershopController extends Controller
     
         return response()->json($response,200);
       }
-    } catch (\Throwable $th) {
-      \Log::debug($th);
-      abort(400);	
+    }catch (\Exception $e) {
+      \Log::debug($e->getMessage());
+      return response()->json(['message' => $e->getMessage()], 400);
     }
 
   }
@@ -84,17 +84,17 @@ class BarbershopController extends Controller
   {
     try {
       $products = Product::where('barbershop_id', $barbershop_id)->get();
-      if(count($products)){
+      if(!count($products)){
+        return response()->json([],200);
+      } else{
         foreach($products as $product){
           $product['images'] = $product->images;
         }
         return response()->json($products,200);
-      } else{
-        return response()->json([],200);
       }
-    } catch (\Throwable $th) {
-      \Log::debug($th);
-      return response()->json(['message' =>'Error showing barbershops'], 400);
+    } catch (\Exception $e) {
+      \Log::debug($e->getMessage());
+      return response()->json(['message' => $e->getMessage()], 400);
     }
   }
 
@@ -151,9 +151,9 @@ class BarbershopController extends Controller
         'products'=>$products,
         'message'=>'Se agregó un nuevo producto a su barbería'
       ],200);
-    } catch (\Throwable $th) {
+    } catch (\Exception $e) {
       DB::rollback();
-      \Log::debug($th);
+      \Log::debug($e->getMessage());
       return response()->json(['message' =>'Error adding product'], 400);
     }
   }
@@ -172,9 +172,9 @@ class BarbershopController extends Controller
       return response()->json([
         'message'=>'El producto fue eliminado de su barbería'
       ],200);
-    } catch (\Throwable $th) {
+    } catch (\Exception $e) {
       DB::rollback();
-      \Log::debug($th);
+      \Log::debug($e->getMessage());
       return response()->json(['message' =>'Error deleting product'], 400);
     }
   }
@@ -234,9 +234,9 @@ class BarbershopController extends Controller
       DB::commit();
       return response()->json($response,200);
 
-    } catch (\Throwable $th) {
+    } catch (\Exception $e) {
       DB::rollback();
-      \Log::debug($th);
+      \Log::debug($e->getMessage());
       return response()->json(['message' =>'Error creating barbershop'], 400);
     }
     /*Upload image
@@ -262,23 +262,24 @@ class BarbershopController extends Controller
           'message'=>'Usted no tiene los permisos para esta acción'
         ],400);
       }
-      $turns = $user->barbershop->turns()
+      $turns = $user->barbershop->turns()->join('products', 'turns.product_id', 'products.id')
+      ->join('barbershops', 'products.barbershop_id', 'barbershops.id')
       ->join('users', 'turns.user_id', 'users.id')
       ->join('data_users', 'users.data_user_id', 'data_users.id')
       ->join('states', function($join) {
-        $join->on('states.turn_id', '=', 'turns.id')
-          ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
-      })
-      ->where('turns.created_at', '>=', Carbon::now()->subYears(1))
-      ->select('turns.*','states.value as turn_state','data_users.phone as user_phone',
-        DB::raw("CONCAT(data_users.first_name,' ', data_users.last_name) as user_name"),
+          $join->on('states.turn_id', '=', 'turns.id') 
+            ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
+        })
+        ->where('turns.created_at', '>=', Carbon::now()->subYears(1))
+        ->select('turns.*','states.value as turn_state', 'barbershops.name as barbershop_name', 'products.name as product_name', 'products.price as price', 
+      DB::raw("CONCAT(data_users.first_name,' ', data_users.last_name) as user_name"),
       )->get();
       foreach ($turns as $turn) {
         $turn["state"] = $turn->lastState()->name();
       }
       return response()->json($turns,200);
-    } catch (\Throwable $th) {
-      \Log::debug($th);
+    } catch (\Exception $e) {
+      \Log::debug($e);
       return response()->json(['message' =>'Error, turns not found'], 400);
     }
   }
@@ -308,14 +309,14 @@ class BarbershopController extends Controller
       $state = State::create(array_merge($request->all(), ['value'=>2]));
       DB::commit();
       return response()->json(["message"=>"Turno aceptado"],200);
-    } catch (\Throwable $th) {
+    } catch (\Exception $e) {
       DB::rollback();
-      \Log::debug($th);
+      \Log::debug($e);
       return response()->json(['message' =>'Error, turns not found'], 400);
     }
    }
 
-  public function cancelTurn($turn_id, $comment = null)
+  public function cancelTurn(Request $request)
   {
     $validator = Validator::make($request->all(), [
       'turn_id' => 'required|numeric|min:1',
@@ -340,9 +341,9 @@ class BarbershopController extends Controller
       $state = State::create(array_merge($request->all(), ['value'=>0]));
       DB::commit();
       return response()->json(["message"=>"Turno cancelado"],200);
-    } catch (\Throwable $th) {
+    } catch (\Exception $e) {
       DB::rollback();
-      \Log::debug($th);
+      \Log::debug($e);
       return response()->json(['message' =>'Error, turns not found'], 400);
     }
   }
@@ -354,52 +355,52 @@ class BarbershopController extends Controller
         $turn['product'] = $turn->product;
         $turn['user'] = $turn->user->getData();
         return response()->json($response, 200);
-      } catch (\Throwable $th) {
-        \Log::debug($th);
+      } catch (\Exception $e) {
+        \Log::debug($e);
         return response()->json(['message' =>'Error, turn not found'], 400);
       }
   }
 
 //************PENDING INTERFACE************
-  public function update(Request $request)
-  {
-    $validator = Validator::make($request->all(), [
-      'name' => 'required|string|min:3|max:255|regex:/^[\pL\s]+$/u',
-      'phone' => 'required|min:5|max:20',
-      'address' => 'required|string|min:3|max:255',
-      'city' => 'required|string|min:3|max:255|regex:/^[\pL\s]+$/u',
-      'state' => 'required|string|min:3|max:255|regex:/^[\pL\s]+$/u',
-      // 'image_path' => 'image'
-    ]);
-    if($validator->fails()){
-      return response()->json(['errors' => $validator->errors()]);
-    }
-    $user = auth()->user();
-    if(!$user || !$user->isBarber()) abort(401);
+  // public function update(Request $request)
+  // {
+  //   $validator = Validator::make($request->all(), [
+  //     'name' => 'required|string|min:3|max:255|regex:/^[\pL\s]+$/u',
+  //     'phone' => 'required|min:5|max:20',
+  //     'address' => 'required|string|min:3|max:255',
+  //     'city' => 'required|string|min:3|max:255|regex:/^[\pL\s]+$/u',
+  //     'state' => 'required|string|min:3|max:255|regex:/^[\pL\s]+$/u',
+  //     // 'image_path' => 'image'
+  //   ]);
+  //   if($validator->fails()){
+  //     return response()->json(['errors' => $validator->errors()]);
+  //   }
+  //   $user = auth()->user();
+  //   if(!$user || !$user->isBarber()) abort(401);
 
-    $user->barbershop->location->address =$request->address;
-    $user->barbershop->location->city = $request->city;
-    $user->barbershop->location->state = $request->state;
-    $user->barbershop->name = $request->name;
-    $user->barbershop->phone = $request->phone;
+  //   $user->barbershop->location->address =$request->address;
+  //   $user->barbershop->location->city = $request->city;
+  //   $user->barbershop->location->state = $request->state;
+  //   $user->barbershop->name = $request->name;
+  //   $user->barbershop->phone = $request->phone;
 
-    //Upload image
-    // $image_path = $request->file('image_path');
-    // if ($image_path) {
-    //   //delete image for be replace
-    //   if($user->barbershop->image){
-    //     Storage::disk('barbershops')->delete($user->barbershop->image);
-    //   }
-    //   $image_path_name = time().$image_path->getClientOriginalName();
-    //   Storage::disk('barbershops')->put($image_path_name, File::get($image_path));
-    //   $user->barbershop->image = $image_path_name;
-    // }
-    $user->barbershop->location->save();
-    $user->barbershop->save();
+  //   //Upload image
+  //   // $image_path = $request->file('image_path');
+  //   // if ($image_path) {
+  //   //   //delete image for be replace
+  //   //   if($user->barbershop->image){
+  //   //     Storage::disk('barbershops')->delete($user->barbershop->image);
+  //   //   }
+  //   //   $image_path_name = time().$image_path->getClientOriginalName();
+  //   //   Storage::disk('barbershops')->put($image_path_name, File::get($image_path));
+  //   //   $user->barbershop->image = $image_path_name;
+  //   // }
+  //   $user->barbershop->location->save();
+  //   $user->barbershop->save();
 
-    return response()->json(['message'=>'Se ha actualizado su barbería correctamente'],200);
+  //   return response()->json(['message'=>'Se ha actualizado su barbería correctamente'],200);
 
-  }
+  // }
 
 /*
 ************IN CONSTRUCTION************

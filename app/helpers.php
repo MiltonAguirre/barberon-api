@@ -27,23 +27,28 @@ function barbershopIsOpen($barbershop, $date, $hours)
 }
 function checkShiftAvailability($product, $date)
 {
-    $start = date('Y-m-d', strtotime($date));
-    //Get turns active for this date &
-    //Check availability for this product        
-    $turnsActive = Turn::join('states', function($join) {
-                        $join->on('states.turn_id', '=', 'turns.id')
-                            ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
-                    })
-                    ->where('turns.barbershop_id', $product->barbershop->id)
-                    ->where('states.value', '>=', 1)
-                    ->where('turns.start', '>=', $start)
-                    ->where('turns.start','<', date('Y-m-d H:i:s', strtotime($start . ' + ' . $product->hours. 'hours + '. $product->minutes . ' minutes')))
-                    ->select('turns.*','states.value as turn_state')
-                    ->get();
-    if(!count($turnsActive)){
-        return true;
+    try {
+        $start = date('Y-m-d', strtotime($date));
+        //Get turns active for this date &
+        //Check availability for this product        
+        $turnsActive = Turn::join('states', function($join) {
+                            $join->on('states.turn_id', '=', 'turns.id')
+                                ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
+                        })
+                        ->where('turns.barbershop_id', $product->barbershop->id)
+                        ->where('states.value', '>=', 1)
+                        ->where('turns.start', '>=', $start)
+                        ->where('turns.start','<', date('Y-m-d H:i:s', strtotime($start . ' + ' . $product->hours. 'hours + '. $product->minutes . ' minutes')))
+                        ->select('turns.*','states.value as turn_state')
+                        ->get();
+        if(!count($turnsActive)){
+            return true;
+        }
+        return false;
+    } catch (\Exception $e) {
+        \Log::error($e->getMessages());
+        return false;
     }
-    return false;
 }
 
 function sendNotify($fields)

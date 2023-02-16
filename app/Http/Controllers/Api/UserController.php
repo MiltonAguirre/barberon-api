@@ -42,20 +42,19 @@ class UserController extends Controller
             if(!barbershopIsOpen($product->barbershop, $date_start, $product->hours)){
                 return response()->json(['message'=>'Error, turno fuera del horario de atencion'],400);
             }
-            $available = checkShiftAvailability($product, $date_start);
-            if(!$available){
+            if(!checkShiftAvailability($product, $date_start)){
                 return response()->json(['message'=>'Error, el horario elegido no esta disponible'],400);
             }
             DB::beginTransaction();
             $user = auth()->user();
-            $new_turn = new Turn();
-            $new_turn->start = $date_start;
-            $new_turn->user()->associate($user);
-            $new_turn->product()->associate($product);
-            $new_turn->barbershop()->associate($product->barbershop);
-            $new_turn->save();
+            $newTurn = new Turn();
+            $newTurn->start = $date_start;
+            $newTurn->user()->associate($user);
+            $newTurn->product()->associate($product);
+            $newTurn->barbershop()->associate($product->barbershop);
+            $newTurn->save();
             $state = new State();
-            $state->turn()->associate($new_turn);
+            $state->turn()->associate($newTurn);
             $state->save();
             $turns = $user->turns->where('created_at', '>=', Carbon::now()->subYears(1));
             foreach($turns as $turn ){
@@ -63,29 +62,35 @@ class UserController extends Controller
                 $turn["barbershop"] = $turn->barbershop->getData();
             }
             DB::commit();
-            event(new StoreTurn);
+            event(new StoreTurn($newTurn));
             return response()->json($turns,200);
-        } catch (\Throwable $th) {
+        } catch (\Exception $e) {
             DB::rollback();
-            \Log::debug($th);
-            return response()->json(['message' => $th->getMessage()], 400);
+            \Log::debug($e->getMessage());
+            return response()->json(['message' => $e->getMessage()], 400);
         }
     }
 
     function getTurns()
     {
         try {
-            $turns = auth()->user()->turns->where('created_at', '>=', Carbon::now()->subYears(1));
-            foreach($turns as $turn ){
-                    $turn["ending"] = $turn->getEnd();
-                    $barbershop = $turn->barbershop;
-                    $barbershop['location'] = $barbershop->location;
-                    $turn["barbershop"] = $barbershop;
-            }
+            $turns = auth()->user()->turns()
+            ->join('products', 'turns.product_id', 'products.id')
+            ->join('barbershops', 'products.barbershop_id', 'barbershops.id')
+            ->join('users', 'turns.user_id', 'users.id')
+            ->join('data_users', 'users.data_user_id', 'data_users.id')
+            ->join('states', function($join) {
+                $join->on('states.turn_id', '=', 'turns.id') 
+                  ->on('states.id', '=', DB::raw("(select max(id) from states WHERE states.turn_id = turns.id)"));
+              })
+              ->where('turns.created_at', '>=', Carbon::now()->subYears(1))
+              ->select('turns.*','states.value as turn_state', 'barbershops.name as barbershop_name', 'products.name as product_name', 'products.price as price', 
+                DB::raw("CONCAT(data_users.first_name,' ', data_users.last_name) as user_name"),
+            )->get();
             return response()->json($turns,200);
-        } catch (\Throwable $th) {
-            \Log::debug($th);
-            return response()->json(['message' => $th->getMessage()], 400);
+        } catch (\Exception $e) {
+            \Log::debug($e->getMessage());
+            return response()->json(['message' => $e->getMessage()], 400);
         }
      }
 
