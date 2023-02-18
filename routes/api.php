@@ -42,7 +42,7 @@ Route::group([
         Route::get('/', 'getTurns');
         Route::post('/', 'storeTurn');
         Route::get('/show/{turn_id}', 'showTurn');    
-        Route::post('/cancel/{turn_id}', 'cancelTurn');
+        Route::get('/cancel/{turn_id}', 'cancelTurn');
     });
 });
 

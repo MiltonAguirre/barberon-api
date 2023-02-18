@@ -100,34 +100,28 @@ class UserController extends Controller
             DB::beginTransaction();
             $user = auth()->user();            
             $turn = Turn::findOrFail($turn_id);
-
             if($user->id !== $turn->user->id){
                 return response()->json([
                     'message'=>'Usted no tiene los permisos para esta acción'
                 ],400);
             }
-            if($turn->state===1 || $turn->state===2 ){
-                $turn->state=0;
-                $turn->save();
-            }else{
+            $current_state = $turn->lastState()->value;
+            if($current_state===1 || $current_state===2 ){
                 return response()->json([
                     'message'=>'El estado del turno no es correcto para esta acción'
                 ],400);
-            }
-            
-            $turns = $user->turns->where('created_at', '>=', Carbon::now()->subYears(1));
-            foreach($turns as $turn ){
-                    $turn["ending"] = $turn->getEnd();
-                    $barbershop = $turn->barbershop;
-                    $barbershop['location'] = $barbershop->location;
-                    $turn["barbershop"] = $barbershop;
+            } else {
+                $state = new State();
+                $state->value = 0;
+                $state->turn()->associate($turn);
+                $state->save();
             }
             DB::commit();
-            return response()->json($turns,200);
-        } catch (\Throwable $th) {
+            return response()->json(['message'=>'Se cancelo el turno correctamente'],200);
+        } catch (\Exception $e) {
             DB::rollback();
-            \Log::debug($th);
-            return response()->json(['message' => $th->getMessage()], 400);
+            \Log::debug($e);
+            return response()->json(['message' => $e->getMessage()], 400);
         } 
     }
     function showTurn($turn_id)
